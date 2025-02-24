@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>WebRTC Demo</title>
+    <style>
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .video-container {
+            display: flex;
+            justify-content: space-between;
+            margin: 20px 0;
+        }
+        video {
+            width: 45%;
+            background: #ddd;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        .stream-controls {
+            margin-top: 20px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .stream-controls input,
+        .stream-controls select {
+            margin: 5px;
+            padding: 8px;
+            width: 300px;
+        }
+        #streamOptions > div {
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebRTC Demo</h1>
+        <div class="video-container">
+            <video id="localVideo" autoplay playsinline></video>
+            <video id="remoteVideo" autoplay playsinline></video>
+        </div>
+        <div class="controls">
+            <button id="startButton">Start</button>
+            <button id="callButton" disabled>Call</button>
+            <button id="hangupButton" disabled>Hang Up</button>
+        </div>
+        <div class="stream-controls">
+            <h3>FFmpeg Stream Controls 123</h3>
+            <select id="streamType">
+                <option value="webcam">Webcam</option>
+                <option value="screen">Screen</option>
+                <option value="file">Video File</option>
+            </select>
+            <div id="streamOptions">
+                <div id="webcamOptions">
+                    <input type="text" id="webcamInput" placeholder="Input device (e.g., /dev/video10)" value="/dev/video10">
+                </div>
+                <div id="screenOptions" style="display: none;">
+                    <input type="text" id="screenDisplay" placeholder="Display (e.g., :0.0)" value=":0.0">
+                    <input type="text" id="screenResolution" placeholder="Resolution (e.g., 1920x1080)" value="1920x1080">
+                </div>
+                <div id="fileOptions" style="display: none;">
+                    <input type="text" id="fileInput" placeholder="Input file path">
+                </div>
+            </div>
+            <button id="startStreamButton">Start Stream</button>
+            <button id="stopStreamButton" disabled onclick="stopStream()">Stop Stream</button>
+        </div>
+    </div>
+
+    <script>
+        let peerConnection;
+        let localStream;
+        let ws;
+
+        const startButton = document.getElementById('startButton');
+        const callButton = document.getElementById('callButton');
+        const hangupButton = document.getElementById('hangupButton');
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+
+        // Initialize WebSocket connection when page loads
+        // Function to start streaming
+        function startStream() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.error('WebSocket is not connected');
+                alert('WebSocket is not connected. Please refresh the page.');
+                return;
+            }
+
+            const streamType = document.getElementById('streamType').value;
+            let inputDevice = '';
+            let resolution = '';
+
+            // Get the appropriate input based on stream type
+            switch(streamType) {
+                case 'webcam':
+                    inputDevice = document.getElementById('webcamInput').value;
+                    break;
+                case 'screen':
+                    inputDevice = document.getElementById('screenDisplay').value;
+                    resolution = document.getElementById('screenResolution').value;
+                    break;
+                case 'file':
+                    inputDevice = document.getElementById('fileInput').value;
+                    break;
+                default:
+                    console.error('Unknown stream type:', streamType);
+                    return;
+            }
+
+            // Validate input
+            if (!inputDevice) {
+                alert('Please provide input device/path');
+                return;
+            }
+
+            if (streamType === 'screen' && !resolution) {
+                alert('Please provide screen resolution');
+                return;
+            }
+
+            ws.send(JSON.stringify({
+                event: 'start-stream',
+                data: {
+                    type: streamType,
+                    inputDevice: inputDevice,
+                    resolution: resolution
+                }
+            }));
+
+            // Update button states
+            updateButtonStates('starting');
+        }
+
+        // Function to stop streaming
+        function stopStream() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.error('WebSocket is not connected');
+                alert('WebSocket is not connected. Please refresh the page.');
+                return;
+            }
+
+            ws.send(JSON.stringify({
+                event: 'stop-stream'
+            }));
+
+            // Update button states
+            updateButtonStates('stopping');
+        }
+
+        // Function to update button states
+        function updateButtonStates(state) {
+            const startStreamButton = document.getElementById('startStreamButton');
+            const stopStreamButton = document.getElementById('stopStreamButton');
+
+            switch(state) {
+                case 'starting':
+                    startStreamButton.disabled = true;
+                    stopStreamButton.disabled = false;
+                    break;
+                case 'stopping':
+                    startStreamButton.disabled = true;
+                    stopStreamButton.disabled = true;
+                    break;
+                case 'ready':
+                    startStreamButton.disabled = false;
+                    stopStreamButton.disabled = true;
+                    break;
+                case 'error':
+                    startStreamButton.disabled = false;
+                    stopStreamButton.disabled = true;
+                    break;
+            }
+        }
+
+        window.onload = function() {
+            console.log('Page loaded, connecting WebSocket...');
+            connectWebSocket();
+
+            // Add button event handlers
+            startButton.onclick = start;
+            callButton.onclick = call;
+            hangupButton.onclick = hangup;
+
+            // Initialize stream controls
+            const streamType = document.getElementById('streamType');
+            const startStreamButton = document.getElementById('startStreamButton');
+            const stopStreamButton = document.getElementById('stopStreamButton');
+
+            startStreamButton.onclick = startStream;
+            stopStreamButton.onclick = stopStream;
+
+            // Set initial button states
+            updateButtonStates('ready');
+
+            // Show initial stream options
+            updateStreamOptions(streamType.value);
+        };
+
+        // Stream type selection handling
+        const streamType = document.getElementById('streamType');
+        const webcamOptions = document.getElementById('webcamOptions');
+        const screenOptions = document.getElementById('screenOptions');
+        const fileOptions = document.getElementById('fileOptions');
+
+        function updateStreamOptions(type) {
+            webcamOptions.style.display = 'none';
+            screenOptions.style.display = 'none';
+            fileOptions.style.display = 'none';
+
+            switch(type) {
+                case 'webcam':
+                    webcamOptions.style.display = 'block';
+                    break;
+                case 'screen':
+                    screenOptions.style.display = 'block';
+                    break;
+                case 'file':
+                    fileOptions.style.display = 'block';
+                    break;
+            }
+        }
+
+        streamType.onchange = function() {
+            updateStreamOptions(this.value);
+        };
+        async function start() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    audio: true,
+                    video: true
+                });
+                localVideo.srcObject = localStream;
+                startButton.disabled = true;
+                callButton.disabled = false;
+            } catch (error) {
+                console.error('Error accessing media devices:', error);
+                alert('Error accessing camera/microphone: ' + error.message);
+            }
+        }
+
+        function connectWebSocket() {
+            if (ws && ws.readyState !== WebSocket.CLOSED) {
+                console.log('WebSocket already exists');
+                return;
+            }
+
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsURL = wsProtocol + '//' + window.location.host + '/ws';
+            console.log('Connecting to WebSocket at:', wsURL);
+
+            ws = new WebSocket(wsURL);
+            
+            ws.onopen = function() {
+                console.log('WebSocket connection established');
+                updateButtonStates('ready');
+            };
+
+            ws.onclose = function() {
+                console.log('WebSocket connection closed');
+                updateButtonStates('error');
+                // Try to reconnect after 2 seconds
+                setTimeout(connectWebSocket, 2000);
+            };
+
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                updateButtonStates('error');
+            };
+            
+            ws.onmessage = async function(e) {
+                let msg;
+                try {
+                    msg = JSON.parse(e.data);
+                    console.log('Received message:', msg);
+                } catch (error) {
+                    console.error('Error parsing message:', error);
+                    return;
+                }
+                
+                switch (msg.event) {
+                    case 'stream-started':
+                        console.log('Stream started successfully');
+                        updateButtonStates('starting');
+                        break;
+                    case 'stream-error':
+                        console.error('Stream error:', msg.data.error);
+                        updateButtonStates('error');
+                        alert('Stream error: ' + msg.data.error);
+                        break;
+                    case 'stream-stopped':
+                        console.log('Stream stopped successfully');
+                        updateButtonStates('ready');
+                        break;
+                    case 'answer':
+                        console.log('Received answer');
+                        try {
+                            const answer = new RTCSessionDescription({
+                                type: 'answer',
+                                sdp: msg.data.sdp
+                            });
+                            await peerConnection.setRemoteDescription(answer);
+                        } catch (error) {
+                            console.error('Error setting remote description:', error);
+                        }
+                        break;
+                    case 'ice-candidate':
+                        console.log('Received ICE candidate');
+                        if (msg.data.candidate) {
+                            try {
+                                await peerConnection.addIceCandidate(msg.data.candidate);
+                            } catch (error) {
+                                console.error('Error adding ICE candidate:', error);
+                            }
+                        }
+                        break;
+                    default:
+                        console.log('Unhandled event:', msg.event);
+                }
+            };
+        }
+
+        async function call() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.error('WebSocket is not connected');
+                alert('WebSocket is not connected. Please wait for connection.');
+                return;
+            }
+
+            if (!localStream) {
+                console.error('No local stream available');
+                alert('Please click Start to access your camera first.');
+                return;
+            }
+
+            try {
+                callButton.disabled = true;
+                hangupButton.disabled = false;
+
+                const configuration = {
+                    iceServers: [{
+                        urls: 'stun:stun.l.google.com:19302'
+                    }]
+                };
+
+                peerConnection = new RTCPeerConnection(configuration);
+
+                peerConnection.onicecandidate = e => {
+                    if (e.candidate) {
+                        console.log('Sending ICE candidate');
+                        ws.send(JSON.stringify({
+                            event: 'ice-candidate',
+                            data: {
+                                candidate: e.candidate
+                            }
+                        }));
+                    }
+                };
+
+                peerConnection.oniceconnectionstatechange = () => {
+                    console.log('ICE connection state:', peerConnection.iceConnectionState);
+                };
+
+                peerConnection.ontrack = e => {
+                    console.log('Received remote track');
+                    if (e.streams && e.streams[0]) {
+                        remoteVideo.srcObject = e.streams[0];
+                    }
+                };
+
+                // Add local tracks to the connection
+                localStream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, localStream);
+                });
+
+                // Create and send offer
+                try {
+                    const offer = await peerConnection.createOffer();
+                    await peerConnection.setLocalDescription(offer);
+                    console.log('Sending offer');
+                    ws.send(JSON.stringify({
+                        event: 'offer',
+                        data: {
+                            sdp: offer.sdp
+                        }
+                    }));
+                } catch (error) {
+                    console.error('Error creating/sending offer:', error);
+                    alert('Error establishing video call: ' + error.message);
+                    hangup();
+                }
+            } catch (error) {
+                console.error('Error setting up peer connection:', error);
+                alert('Error setting up video call: ' + error.message);
+                hangup();
+            }
+        }
+
+        async function hangup() {
+            console.log('Hanging up call');
+            hangupButton.disabled = true;
+            callButton.disabled = false;
+
+            if (localStream) {
+                localStream.getTracks().forEach(track => {
+                    track.stop();
+                    console.log('Stopped track:', track.kind);
+                });
+                localVideo.srcObject = null;
+            }
+
+            if (remoteVideo.srcObject) {
+                remoteVideo.srcObject.getTracks().forEach(track => track.stop());
+                remoteVideo.srcObject = null;
+            }
+
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+
+            // Send hangup event to server
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    event: 'hangup',
+                    data: {}
+                }));
+            }
+        }
+
+        function hangup() {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            
+            if (ws) {
+                ws.close();
+            }
+
+            remoteVideo.srcObject = null;
+            callButton.disabled = false;
+            hangupButton.disabled = true;
+        }
+    </script>
+</body>
+</html>
