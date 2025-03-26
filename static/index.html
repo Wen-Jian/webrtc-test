@@ -58,28 +58,6 @@
             <button id="callButton" disabled>Call</button>
             <button id="hangupButton" disabled>Hang Up</button>
         </div>
-        <div class="stream-controls">
-            <h3>FFmpeg Stream Controls 123</h3>
-            <select id="streamType">
-                <option value="webcam">Webcam</option>
-                <option value="screen">Screen</option>
-                <option value="file">Video File</option>
-            </select>
-            <div id="streamOptions">
-                <div id="webcamOptions">
-                    <input type="text" id="webcamInput" placeholder="Input device (e.g., /dev/video10)" value="/dev/video10">
-                </div>
-                <div id="screenOptions" style="display: none;">
-                    <input type="text" id="screenDisplay" placeholder="Display (e.g., :0.0)" value=":0.0">
-                    <input type="text" id="screenResolution" placeholder="Resolution (e.g., 1920x1080)" value="1920x1080">
-                </div>
-                <div id="fileOptions" style="display: none;">
-                    <input type="text" id="fileInput" placeholder="Input file path">
-                </div>
-            </div>
-            <button id="startStreamButton">Start Stream</button>
-            <button id="stopStreamButton" disabled onclick="stopStream()">Stop Stream</button>
-        </div>
     </div>
 
     <script>
@@ -383,10 +361,15 @@
                     }
                 };
 
-                // Add local tracks to the connection
-                localStream.getTracks().forEach(track => {
-                    peerConnection.addTrack(track, localStream);
-                });
+                try {
+                    const localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                    localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+                    console.log('Local stream added to peer connection');
+                } catch (error) {
+                    console.error('Error accessing media devices.', error);
+                    alert('Error accessing media devices.');
+                    return;
+                }
 
                 // Create and send offer
                 try {

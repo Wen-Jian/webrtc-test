@@ -1,4 +1,4 @@
-package main
+package ffmpeg
 
 import (
 	"bufio"
@@ -100,7 +100,7 @@ func (f *FFmpegStreamer) Stop() {
 // startFFmpeg starts the FFmpeg process with the given arguments
 func (f *FFmpegStreamer) startFFmpeg(ctx context.Context, args []string) error {
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	
+
 	// Create pipes for stdout and stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -151,12 +151,12 @@ func (f *FFmpegStreamer) startFFmpeg(ctx context.Context, args []string) error {
 				return
 			}
 			// Only log actual errors, not info messages
-			if strings.Contains(line, "Error") || 
-			   strings.Contains(line, "error") || 
-			   strings.Contains(line, "failed") || 
-			   strings.Contains(line, "Failed") || 
-			   strings.Contains(line, "Invalid") || 
-			   strings.Contains(line, "invalid") {
+			if strings.Contains(line, "Error") ||
+				strings.Contains(line, "error") ||
+				strings.Contains(line, "failed") ||
+				strings.Contains(line, "Failed") ||
+				strings.Contains(line, "Invalid") ||
+				strings.Contains(line, "invalid") {
 				log.Printf("FFmpeg Error: %s", line)
 			}
 		}
@@ -172,5 +172,3 @@ func (f *FFmpegStreamer) startFFmpeg(ctx context.Context, args []string) error {
 
 	return nil
 }
-
-
